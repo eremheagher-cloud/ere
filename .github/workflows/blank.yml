@@ -1,0 +1,287 @@
+
+name: PC criado pelo @alves7.pcm
+
+on:
+  workflow_dispatch:
+    inputs:
+      instance_number:
+        description: "Instance Number (1-10)"
+        required: true
+        default: "1"
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  deploy-rdp:
+    runs-on: windows-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: System Information
+        shell: pwsh
+        run: |
+          Write-Host "=== ENIGMANO RDP DEPLOYMENT ==="
+          Write-Host "Nome: rafael"
+          Write-Host "Instance Number: ${{ inputs.instance_number }}"
+          Write-Host "Runner: $env:RUNNER_NAME"
+          Write-Host "Workflow: $env:GITHUB_WORKFLOW"
+          Write-Host "Identificador: rafael37464"
+          Write-Host "Nome desejado do PC: Eva"
+
+          Write-Host "=== SYSTEM SPECIFICATIONS ==="
+
+          Get-ComputerInfo |
+            Select-Object WindowsProductName, WindowsVersion, OsArchitecture
+
+          Get-CimInstance Win32_ComputerSystem |
+            Select-Object Name, TotalPhysicalMemory
+
+          Get-CimInstance Win32_Processor |
+            Select-Object Name, NumberOfCores, NumberOfLogicalProcessors
+
+          Get-PSDrive -PSProvider FileSystem |
+            Select-Object Name, Used, Free
+
+          Write-Host "Os recursos dependem do runner do GitHub."
+
+      - name: Check RDP Configuration
+        shell: pwsh
+        run: |
+          $rdpPath = 'HKLM:\System\CurrentControlSet\Control\Terminal Server'
+
+          Write-Host "=== REMOTE DESKTOP CHECK ==="
+
+          if (Test-Path $rdpPath) {
+            $rdpStatus = Get-ItemProperty `
+              -Path $rdpPath `
+              -Name fDenyTSConnections
+
+            if ($rdpStatus.fDenyTSConnections -eq 0) {
+              Write-Host "RDP habilitado na configuracao."
+            }
+            else {
+              Write-Host "RDP desabilitado na configuracao."
+            }
+          }
+          else {
+            Write-Host "Configuracao RDP nao encontrada."
+          }
+
+          Write-Host "Esta etapa apenas verifica a configuracao."
+
+      - name: Create User Account
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $Username = 'rafael'
+          $GeneratedPassword = $null
+          $SecurePassword = $null
+          $RandomText = $null
+          $RandomBytes = New-Object byte[] 32
+          $Rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+
+          try {
+            $Rng.GetBytes($RandomBytes)
+            $RandomText = [Convert]::ToBase64String($RandomBytes)
+            $GeneratedPassword = 'Ra@' + $RandomText.Substring(0, 20) + '7!'
+
+            Write-Output "::add-mask::$GeneratedPassword"
+
+            $SecurePassword = ConvertTo-SecureString `
+              $GeneratedPassword `
+              -AsPlainText `
+              -Force
+
+            $User = Get-LocalUser `
+              -Name $Username `
+              -ErrorAction SilentlyContinue
+
+            if ($null -eq $User) {
+              New-LocalUser `
+                -Name $Username `
+                -Password $SecurePassword `
+                -Description "Conta local rafael" |
+                Out-Null
+
+              Write-Host "Conta rafael criada."
+            }
+            else {
+              Set-LocalUser `
+                -Name $Username `
+                -Password $SecurePassword
+
+              Write-Host "Senha da conta rafael atualizada."
+            }
+
+            Write-Host "Senha aleatoria aplicada."
+            Write-Host "A senha nao sera exibida nos logs."
+            Write-Host "Identificador: rafael37464"
+            Write-Host "Nome desejado do PC: Eva"
+          }
+          finally {
+            $SecurePassword = $null
+            $GeneratedPassword = $null
+            $Rng.Dispose()
+            [Array]::Clear($RandomBytes, 0, $RandomBytes.Length)
+
+            Remove-Variable SecurePassword, GeneratedPassword, RandomText `
+              -ErrorAction SilentlyContinue
+          }
+
+      - name: Install Tailscale
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $tsUrl = 'https://pkgs.tailscale.com/stable/tailscale-setup-1.82.0-amd64.msi'
+          $installerPath = Join-Path $env:TEMP 'tailscale.msi'
+
+          try {
+            Write-Host "Baixando Tailscale..."
+            Invoke-WebRequest -Uri $tsUrl -OutFile $installerPath
+
+            $process = Start-Process `
+              -FilePath 'msiexec.exe' `
+              -ArgumentList "/i `"$installerPath`" /quiet /norestart" `
+              -Wait `
+              -PassThru
+
+            if ($process.ExitCode -notin @(0, 3010)) {
+              throw "Instalacao do Tailscale falhou: $($process.ExitCode)"
+            }
+
+            Write-Host "Tailscale instalado."
+          }
+          finally {
+            if (Test-Path $installerPath) {
+              Remove-Item $installerPath -Force
+            }
+          }
+
+      - name: Check Tailscale Authentication
+        shell: pwsh
+        env:
+          TAILSCALE_AUTH_KEY: ${{ secrets.TAILSCALE_AUTH_KEY }}
+        run: |
+          $tsExe = 'C:\Program Files\Tailscale\tailscale.exe'
+
+          if (-not (Test-Path $tsExe)) {
+            Write-Host "Executavel do Tailscale nao encontrado."
+          }
+          elseif ([string]::IsNullOrWhiteSpace($env:TAILSCALE_AUTH_KEY)) {
+            Write-Host "TAILSCALE_AUTH_KEY nao configurado."
+          }
+          else {
+            Write-Host "Chave configurada; valor protegido."
+            Write-Host "Esta etapa nao autentica o dispositivo."
+          }
+
+          Remove-Item Env:TAILSCALE_AUTH_KEY -ErrorAction SilentlyContinue
+
+      - name: Get Tailscale Status
+        shell: pwsh
+        continue-on-error: true
+        run: |
+          $tsExe = 'C:\Program Files\Tailscale\tailscale.exe'
+
+          if (Test-Path $tsExe) {
+            & $tsExe status
+            if ($LASTEXITCODE -ne 0) {
+              Write-Host "Tailscale desconectado ou nao autenticado."
+            }
+          }
+          else {
+            Write-Host "Tailscale nao esta instalado."
+          }
+
+      - name: Install Google Chrome
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $chromeUrl = 'https://dl.google.com/chrome/install/latest/chrome_installer.exe'
+          $installerPath = Join-Path $env:TEMP 'chrome_installer.exe'
+
+          try {
+            Write-Host "Baixando Google Chrome..."
+            Invoke-WebRequest -Uri $chromeUrl -OutFile $installerPath
+
+            $process = Start-Process `
+              -FilePath $installerPath `
+              -ArgumentList '/silent /install' `
+              -Wait `
+              -PassThru
+
+            if ($process.ExitCode -ne 0) {
+              throw "Instalacao do Chrome falhou: $($process.ExitCode)"
+            }
+
+            Write-Host "Google Chrome instalado."
+          }
+          finally {
+            if (Test-Path $installerPath) {
+              Remove-Item $installerPath -Force
+            }
+          }
+
+      - name: Install 7-Zip
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $zipUrl = 'https://www.7-zip.org/a/7z2409-x64.exe'
+          $installerPath = Join-Path $env:TEMP '7z-installer.exe'
+
+          try {
+            Write-Host "Baixando 7-Zip..."
+            Invoke-WebRequest -Uri $zipUrl -OutFile $installerPath
+
+            $process = Start-Process `
+              -FilePath $installerPath `
+              -ArgumentList '/S' `
+              -Wait `
+              -PassThru
+
+            if ($process.ExitCode -ne 0) {
+              throw "Instalacao do 7-Zip falhou: $($process.ExitCode)"
+            }
+
+            Write-Host "7-Zip instalado."
+          }
+          finally {
+            if (Test-Path $installerPath) {
+              Remove-Item $installerPath -Force
+            }
+          }
+
+      - name: Connection Details
+        shell: pwsh
+        run: |
+          Write-Host "=== CONNECTION DETAILS ==="
+          Write-Host "Usuario local: rafael"
+          Write-Host "Workflow: $env:GITHUB_WORKFLOW"
+          Write-Host "Instance Number: ${{ inputs.instance_number }}"
+          Write-Host "Identificador: rafael37464"
+          Write-Host "Nome desejado do PC: Eva"
+          Write-Host "Nenhum endereco RDP externo foi configurado."
+          Write-Host "A senha gerada nao e exibida nos logs."
+          Write-Host "O runner sera descartado ao terminar o job."
+
+      - name: Keep Session Alive
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $EndTime = (Get-Date).AddMinutes(25)
+
+          Write-Host "=== SESSION CHECK ==="
+          Write-Host "Tempo de espera: 25 minutos."
+
+          while ((Get-Date) -lt $EndTime) {
+            Write-Host "Sessao em execucao: $(Get-Date -Format 'HH:mm:ss')"
+            Start-Sleep -Seconds 30
+          }
+
+          Write-Host "Tempo de espera concluido."
+          
